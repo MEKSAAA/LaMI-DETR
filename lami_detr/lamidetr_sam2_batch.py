@@ -148,10 +148,10 @@ if __name__ == '__main__':
     model.to(cfg.train.device)
     model.eval()
     DetectionCheckpointer(model).load(cfg.train.init_checkpoint)
-    dataset = CustomDataset('../output/rhlf-10/images', 
-        '../output/rhlf-10/visual_descs_doubao')
+    dataset = CustomDataset('../examples/richhf/images', 
+        '../examples/richhf/visual_descs')
     test_dataloader = DataLoader(dataset, collate_fn=dataset.collate_fn, batch_size=1, shuffle=False)
-    output = '../output/rhlf-10/results_doubao'
+    output = '../examples/richhf/results'
     
     # 创建输出目录
     os.makedirs(output, exist_ok=True)

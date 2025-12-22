@@ -21,11 +21,11 @@ ARK_BASE_URL = os.environ.get("ARK_BASE_URL", "https://ark.cn-beijing.volces.com
 ARK_API_KEY = os.environ.get("ARK_API_KEY", "")
 ARK_MODEL = os.environ.get("ARK_MODEL", "doubao-seed-1-6-251015")
 
-IMAGE_DIR = os.environ.get("IMAGE_DIR", "./output/rhlf-10/images")
-META_JSON = os.environ.get("META_JSON", "./output/rhlf-10/richhf10-meta.json")
-OUT_DIR = os.environ.get("OUT_DIR", "./output/rhlf-10/visual_descs_doubao")
+IMAGE_DIR = os.environ.get("IMAGE_DIR", "./examples/richhf/images")
+META_JSON = os.environ.get("META_JSON", "./examples/richhf/meta.json")
+OUT_DIR = os.environ.get("OUT_DIR", "./examples/richhf/visual_descs")
 
-BATCH_SIZE = int(os.environ.get("BATCH_SIZE", "5"))
+BATCH_SIZE = int(os.environ.get("BATCH_SIZE", "3"))
 SLEEP_S = float(os.environ.get("SLEEP_S", "0.2"))
 
 TEMPERATURE = float(os.environ.get("TEMPERATURE", "0.2"))

@@ -147,3 +147,8 @@ lvis-debug/*
 pretrained_models/*
 
 dataset/
+
+!examples/
+!examples/*
+!examples/**/*.jpg
+!examples/**/*.json
