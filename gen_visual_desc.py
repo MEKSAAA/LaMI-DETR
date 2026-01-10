@@ -20,7 +20,7 @@ TEMPERATURE = 0.2
 
 # ================== DeepSeek Client ==================
 client = OpenAI(
-    api_key=os.environ.get("DEEPSEEK_API_KEY","sk-e8c333950a3c4ccc9b4a3f0232cb2ac8"),
+    api_key=os.environ.get("DEEPSEEK_API_KEY",""),
     base_url=BASE_URL
 )
 
