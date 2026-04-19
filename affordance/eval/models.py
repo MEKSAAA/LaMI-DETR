@@ -1,16 +1,58 @@
 def load_qwen25vl_model(model_path):
+    import os
+    import re
     import torch
     from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor
-    # Qwen2.5-VL-specific imports
-    model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-        model_path,
-        torch_dtype=torch.bfloat16,
+
+    if model_path is None:
+        raise ValueError(
+            "未指定 model_path：请用 --model_path 指向包含 config.json 的本地目录，或传入 Hugging Face 模型 ID。"
+        )
+
+    raw = model_path.strip()
+    expanded = os.path.expanduser(raw)
+    resolved = os.path.abspath(expanded)
+
+    # 与 Hub 上 model id（仅含一个 '/'）区分，避免把 namespace/model 当成相对路径报错
+    hub_repo_id_pattern = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-]*/[A-Za-z0-9][A-Za-z0-9_.\-]*$")
+
+    # transformers 仅在路径为「已存在的目录」时按本地文件夹加载；若本地绝对路径不存在，
+    # 会误入下载/缓存分支，路径里多个 '/' 会在 validate_repo_id 处触发 HFValidationError。
+    local_only = False
+    load_path = raw
+
+    if os.path.isdir(resolved):
+        load_path = resolved
+        local_only = True
+    elif hub_repo_id_pattern.match(raw):
+        load_path = raw
+        local_only = False
+    elif os.path.isabs(expanded) or expanded.startswith((".", "~")):
+        raise FileNotFoundError(
+            f"本地模型路径不存在或不是目录: {resolved}\n"
+            "请确认模型已下载到该路径，且目录内包含 config.json、tokenizer 与权重文件。"
+        )
+    else:
+        raise FileNotFoundError(
+            f"找不到模型目录: {resolved}\n"
+            "若为本地目录请检查拼写；若要从 Hub 加载请使用形如 Qwen/Qwen2.5-VL-3B-Instruct 的模型 ID。"
+        )
+
+    load_kw = dict(
+        dtype=torch.bfloat16,
         device_map="cuda",
         attn_implementation="flash_attention_2",
-        trust_remote_code=True
+        trust_remote_code=True,
+        local_files_only=local_only,
     )
+
+    model = Qwen2_5_VLForConditionalGeneration.from_pretrained(load_path, **load_kw)
     model.eval()
-    processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
+    processor = AutoProcessor.from_pretrained(
+        load_path,
+        trust_remote_code=True,
+        local_files_only=local_only,
+    )
     return {"model": model, "processor": processor}
 
 def run_qwen25vl(question, image_path, kwargs, temperature=0.1, top_k=50, top_p=0.9, **generation_kwargs):

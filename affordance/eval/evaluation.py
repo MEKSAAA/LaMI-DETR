@@ -117,9 +117,9 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser()
-    parser.add_argument("--gt_file", required=True, default="RoboAffordance-Eval/roboaffordance/annotations.json", help="Path to ground truth JSON file")
+    parser.add_argument("--gt_file", required=True, default="/data9/data/miaojw/projects26/LaMI-DETR/dataset/RoboAfford-Eval/annotations.json", help="Path to ground truth JSON file")
     parser.add_argument("--model_results_file", required=True, help="Path to model results JSON file")
-    parser.add_argument("--data_dir", required=True, default="RoboAffordance-Eval/roboaffordance/images", help="Root directory of dataset")
+    parser.add_argument("--data_dir", required=True, default="/data9/data/miaojw/projects26/LaMI-DETR/dataset/RoboAfford-Eval/images", help="Root directory of dataset")
     parser.add_argument("--output_file", default="./results/evaluation_results.json", help="Output file for evaluation results")
     args = parser.parse_args()
     

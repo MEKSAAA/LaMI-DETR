@@ -157,9 +157,9 @@ def main():
                         help="Name of the model to evaluate")
     parser.add_argument("--model_path", default=None, 
                         help="Optional path to model checkpoint (overrides default)")
-    parser.add_argument("--data_dir", default="./images", 
+    parser.add_argument("--data_dir", default="/data9/data/miaojw/projects26/LaMI-DETR/dataset/RoboAfford-Eval/images", 
                         help="Directory containing images")
-    parser.add_argument("--mask_dir", default="./masks", 
+    parser.add_argument("--mask_dir", default="/data9/data/miaojw/projects26/LaMI-DETR/dataset/RoboAfford-Eval/masks", 
                         help="Directory containing mask images")
     parser.add_argument("--annotations", default="annotations_normxy.json", 
                         help="Path to annotations file")

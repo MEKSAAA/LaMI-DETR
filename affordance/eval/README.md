@@ -1,6 +1,7 @@
 # RoboAfford: A Dataset and Benchmark for Enhancing Object and Spatial Affordance Learning in Robot Manipulation
 
 ## Environment Setup
+环境可以用pr11
 ```
 git clone https://github.com/tyb197/RoboAfford.git
 cd RoboAfford

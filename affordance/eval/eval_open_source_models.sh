@@ -12,4 +12,6 @@
 
 # python inference.py --model qwen25vl-7b --model_path /share/project/tangyingbo/checkpoint/Qwen2.5-VL-7B-Instruct --annotations "annotations_absxy.json" --output "./results_open_source_models/qwen25vl-7b.json"
 
-python inference.py --model qwen25vl-7b-sft --model_path /share/project/tangyingbo/LLaMA-Factory/saves/qwen25vl-7b-sft --annotations "annotations_absxy.json" --output "./results_open_source_models/qwen25vl-7b-sft.json"
+# python inference.py --model qwen25vl-7b-sft --model_path /share/project/tangyingbo/LLaMA-Factory/saves/qwen25vl-7b-sft --annotations "annotations_absxy.json" --output "./results_open_source_models/qwen25vl-7b-sft.json"
+
+python inference.py --model qwen25vl-3b --model_path /NEW_EDS/miaojw/models/Qwen2.5-VL-3B-Instruct --annotations "/data9/data/miaojw/projects26/LaMI-DETR/dataset/RoboAfford-Eval/annotations_absxy.json" --output "./results_open_source_models/qwen25vl-3b.json"

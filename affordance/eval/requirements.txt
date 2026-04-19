@@ -8,7 +8,7 @@ anyio==4.9.0
 astor==0.8.1
 async-timeout==5.0.1
 attrs==25.3.0
-av==14.3.0
+av==14..0
 blake3==1.0.4
 cachetools==5.5.2
 certifi==2025.4.26
