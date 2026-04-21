@@ -1,6 +1,6 @@
 # Agentic Affordance Harness (RoboAfford-Eval)
 
-参数冻结的 **Orchestrator + Skills + Tools** 流水线：输入图像与问题，产出 RoboAfford 可用的 **归一化坐标点**，并写出结构化 **trace**（便于后续 self-evolve）。
+参数冻结的 **LLM-orchestrated Harness Agent**：输入图像与问题后，LLM planner 会在统一 **library（skills + tools）** 中显式选择能力并生成 step-based plan，代码层负责校验/执行/追踪（含 fallback），整体按 `plan -> act -> observe -> decide` 闭环执行并产出 RoboAfford 可用的 **归一化坐标点**。
 
 ## 依赖
 

@@ -18,27 +18,22 @@ from typing import Any, Dict, Optional
 from PIL import Image
 
 
-PLANNER_SYSTEM = """You are the planner for an affordance agent.
-Given an image and a question, return STRICT JSON only (no markdown) with keys:
+PLANNER_SYSTEM = """You are the orchestrator-planner for an affordance harness agent.
+Given an image, question, and available skill/tool library, return STRICT JSON only (no markdown) with keys:
 {
+  "task_understanding": "one sentence",
   "task_type": "object_affordance_recognition|object_affordance_prediction|spatial_affordance_localization",
-  "confidence": 0.0-1.0,
-  "reason": "short reason",
-  "need_search": true|false,
-  "search_queries": ["..."],
-  "prompt_overrides": {
-    "object_prompt": "...",
-    "part_prompt": "...",
-    "spatial_query": "...",
-    "negative_hint": "..."
-  },
-  "need_zoom": true|false,
-  "analysis_type": "interior_region|elongated_grasp_region|free_space_between_boxes",
-  "reasoning_summary": "one sentence"
+  "selected_skills": [{"name":"...", "reason":"..."}],
+  "selected_tools": [{"name":"...", "reason":"..."}],
+  "steps": [
+    {"step_id":1, "kind":"tool", "name":"...", "args":{}, "expected_observation":"..."}
+  ],
+  "final_strategy": {"type":"aggregate_point", "reason":"..."},
+  "fallback_policy": {"use_rules_if_invalid_plan": true}
 }
 Constraints:
-- Favor concise grounded prompts.
-- If uncertain, still choose one valid task_type.
+- Steps must use only tools from provided library.
+- Always include >=1 step and final_strategy.
 - Output valid JSON only.
 """
 
@@ -125,12 +120,12 @@ class LLMReasoner:
         )
         self._local_loaded = True
 
-    def _local_plan(self, question: str, image: Image.Image) -> Dict[str, Any]:
+    def _local_plan(self, question: str, image: Image.Image, planner_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         self._ensure_local()
         assert self._processor is not None and self._model is not None
         import torch
 
-        user_prompt = f"{PLANNER_SYSTEM}\nQuestion: {question}"
+        user_prompt = f"{PLANNER_SYSTEM}\nQuestion: {question}\nLibrary: {json.dumps(planner_context or {}, ensure_ascii=False)}"
         messages_for_trace = [
             {
                 "role": "user",
@@ -183,7 +178,7 @@ class LLMReasoner:
             raise RuntimeError("Failed to parse JSON from local VLM output")
         return parsed
 
-    def _api_plan(self, question: str, image: Image.Image) -> Dict[str, Any]:
+    def _api_plan(self, question: str, image: Image.Image, planner_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         from openai import OpenAI
 
         api_key = self.cfg.api_key or os.environ.get("ARK_API_KEY") or os.environ.get("OPENAI_API_KEY")
@@ -201,6 +196,7 @@ class LLMReasoner:
                 "role": "user",
                 "content": [
                     {"type": "text", "text": f"Question: {question}"},
+                    {"type": "text", "text": f"Library: {json.dumps(planner_context or {}, ensure_ascii=False)}"},
                     {"type": "image_url", "image_url": {"url": image_url}},
                 ],
             },
@@ -241,13 +237,13 @@ class LLMReasoner:
             raise RuntimeError("Failed to parse JSON from API VLM output")
         return parsed
 
-    def plan(self, question: str, image: Image.Image) -> Dict[str, Any]:
+    def plan(self, question: str, image: Image.Image, planner_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         self._last_trace = {}
         mode = (self.cfg.mode or "rules").lower()
         if mode == "local_qwen_vl":
-            return self._local_plan(question, image)
+            return self._local_plan(question, image, planner_context)
         if mode == "api_vlm":
-            return self._api_plan(question, image)
+            return self._api_plan(question, image, planner_context)
         raise RuntimeError(f"LLMReasoner mode not supported for planning: {mode}")
 
 
@@ -276,4 +272,3 @@ def load_reasoner_config(pipeline_cfg: Dict[str, Any]) -> ReasonerConfig:
         max_new_tokens=max_new_tokens,
         temperature=temperature,
     )
-

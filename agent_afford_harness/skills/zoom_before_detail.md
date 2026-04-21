@@ -1,9 +1,21 @@
+name: zoom_before_detail
+type: skill
+description: Decide whether ROI crop/zoom is needed before detailed localization.
+input_schema:
+  task_type: str
+  question: str
+  lami_boxes: list[dict]
+  image_size: tuple[int, int]
+  llm_need_zoom: bool | null
+output_schema:
+  need_zoom: bool
+  crop_target_index: int
+  padding_ratio: float
+  resize_max_side: int
+policy:
+  - Prefer zoom for part/spatial fine-grained queries.
+  - Increase zoom tendency when target box area is small.
+
 # Skill: zoom_before_detail
 
-This skill decides whether the pipeline should switch from full-image processing to local high-resolution processing before detailed analysis. It consumes task type, question text, candidate boxes, and image size, then produces a deterministic crop policy (`need_zoom`, `crop_target_index`, `padding_ratio`, `resize_max_side`).
-
-The policy favors zoom for part localization by default, and for spatial tasks when wording suggests fine geometry (for example: between, edge, interior, rim, handle). It also escalates to zoom when candidate region area is too small relative to the image, because part-level reasoning is often unstable at full-frame scale.
-
-If no reliable candidate boxes exist, fallback is safe and explicit: do not crop, continue on the full image, and let later tools/aggregators handle the case. This prevents hard failures while preserving reproducibility.
-
-All crop decisions and resulting crop metadata are persisted through `zoom_crop_tool` entries in `tool_call_history`.
+Policy skill controlling pre-analysis crop.

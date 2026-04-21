@@ -1,20 +1,23 @@
-"""Orchestrator: skill selection + tool planning + aggregation."""
+"""Orchestrator: LLM plan -> validation -> step execution -> fallback."""
 
 from __future__ import annotations
 
 import os
-import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from PIL import Image
 
 from agent_afford_harness.agent import router as R
-from agent_afford_harness.agent.aggregator import aggregate_part, aggregate_recognition, aggregate_spatial
+from agent_afford_harness.agent.execution_state import ExecutionState
+from agent_afford_harness.agent.library import build_skill_library, build_tool_library
+from agent_afford_harness.agent.library_context import build_library_context, tool_required_args_hint
 from agent_afford_harness.agent.llm_reasoner import LLMReasoner, load_reasoner_config
+from agent_afford_harness.agent.plan_executor import execute_plan
+from agent_afford_harness.agent.plan_schema import Plan, plan_from_dict
+from agent_afford_harness.agent.plan_validator import validate_plan
 from agent_afford_harness.agent.skills_runtime import (
     skill_code_when_geometry_matters,
     skill_lami_prompt_engineering,
-    skill_point_output_normalization,
     skill_search_triggering,
     skill_task_type_classification,
     skill_zoom_before_detail,
@@ -22,12 +25,8 @@ from agent_afford_harness.agent.skills_runtime import (
 from agent_afford_harness.agent.state import HarnessTrace
 from agent_afford_harness.agent.task_parser import normalize_category_label
 from agent_afford_harness.config_load import load_pipeline_config
-from agent_afford_harness.tools.code_visual_analyzer import tool_code_visual_analyzer
-from agent_afford_harness.tools.lami_detr_tool import LaMIDetrGrounder, tool_lami_detr_grounder
-from agent_afford_harness.tools.web_search_tool import tool_web_search
-from agent_afford_harness.tools.zoom_crop_tool import tool_zoom_crop
+from agent_afford_harness.tools.lami_detr_tool import LaMIDetrGrounder
 from agent_afford_harness.utils.coord_1000 import points_norm_to_1000
-
 
 _REASONER: Optional[LLMReasoner] = None
 
@@ -53,25 +52,83 @@ def map_benchmark_category(category: Optional[str]) -> Optional[str]:
     return R.OBJECT_AFFORDANCE_PREDICTION
 
 
-def _boxes_to_crop_space(
-    boxes: List[Dict[str, Any]],
-    crop_meta: Dict[str, Any],
-) -> List[List[float]]:
-    ox, oy = crop_meta["origin_xy"]
-    cw = crop_meta["crop_width"]
-    ch = crop_meta["crop_height"]
-    out: List[List[float]] = []
-    for b in boxes:
-        x1, y1, x2, y2 = b["bbox"]
-        out.append(
-            [
-                x1 - ox,
-                y1 - oy,
-                x2 - ox,
-                y2 - oy,
-            ]
+def _build_rule_plan(question: str, benchmark_category: Optional[str], image_size: Tuple[int, int]) -> Dict[str, Any]:
+    mapped = map_benchmark_category(benchmark_category)
+    task_info = {"task_type": mapped, "confidence": 0.99, "reason": "benchmark category"} if mapped else skill_task_type_classification(question)
+    task_type = task_info["task_type"]
+    search_info = skill_search_triggering(question, task_info)
+    prompt_info = skill_lami_prompt_engineering(question, task_info, None)
+    zoom_info = skill_zoom_before_detail(task_type, question, [], image_size=image_size)
+    code_info = skill_code_when_geometry_matters(task_type, question, {})
+    if task_type == R.SPATIAL_AFFORDANCE_LOCALIZATION:
+        code_info["need_code_analysis"] = True
+        code_info["analysis_type"] = "free_space_between_boxes"
+
+    selected_skills = [
+        {"name": "task_type_classification", "reason": "baseline task routing"},
+        {"name": "lami_prompt_engineering", "reason": "build grounding prompt"},
+        {"name": "point_output_normalization", "reason": "format benchmark output"},
+    ]
+    selected_tools = [{"name": "lami_detr_grounder", "reason": "obtain candidates"}]
+    steps: List[Dict[str, Any]] = [
+        {
+            "step_id": 1,
+            "kind": "tool",
+            "name": "lami_detr_grounder",
+            "args": {"prompt_info": prompt_info},
+            "expected_observation": "candidate detection boxes",
+        }
+    ]
+    sid = 2
+    if search_info.get("need_search"):
+        selected_skills.append({"name": "search_triggering", "reason": "long-tail knowledge"})
+        selected_tools.append({"name": "web_search_tool", "reason": "fetch concept cues"})
+        steps.insert(
+            0,
+            {
+                "step_id": sid,
+                "kind": "tool",
+                "name": "web_search_tool",
+                "args": {"queries": search_info.get("queries") or [question]},
+                "expected_observation": "external visual cues",
+            },
         )
-    return out
+        sid += 1
+    if zoom_info.get("need_zoom"):
+        selected_skills.append({"name": "zoom_before_detail", "reason": "small/fine target"})
+        selected_tools.append({"name": "zoom_crop_tool", "reason": "focus on ROI"})
+        steps.append(
+            {
+                "step_id": sid,
+                "kind": "tool",
+                "name": "zoom_crop_tool",
+                "args": {"padding_ratio": zoom_info.get("padding_ratio", 0.15), "max_side": zoom_info.get("resize_max_side", 1024)},
+                "expected_observation": "crop and crop metadata",
+            }
+        )
+        sid += 1
+    if code_info.get("need_code_analysis"):
+        selected_skills.append({"name": "code_when_geometry_matters", "reason": "geometry verification"})
+        selected_tools.append({"name": "code_visual_analyzer", "reason": "deterministic point proposal"})
+        steps.append(
+            {
+                "step_id": sid,
+                "kind": "tool",
+                "name": "code_visual_analyzer",
+                "args": {"analysis_type": code_info.get("analysis_type", "interior_region")},
+                "expected_observation": "point proposal",
+            }
+        )
+
+    return {
+        "task_understanding": f"Rule planner for task type {task_type}",
+        "task_type": task_type,
+        "selected_skills": selected_skills,
+        "selected_tools": selected_tools,
+        "steps": steps,
+        "final_strategy": {"type": "aggregate_point", "reason": "aggregate tool observations into benchmark points"},
+        "fallback_policy": {"use_rules_if_invalid_plan": True},
+    }
 
 
 def run_pipeline(
@@ -89,216 +146,93 @@ def run_pipeline(
     nms_iou = float(orch.get("nms_iou", 0.7))
     score_th = float(orch.get("score_threshold", 0.25))
     topk = int(orch.get("lami_topk", 8))
-    grounding_backend = str(
-        os.environ.get("AGENT_HARNESS_GROUNDING_BACKEND", orch.get("grounding_backend", "lami"))
-    )
+    grounding_backend = str(os.environ.get("AGENT_HARNESS_GROUNDING_BACKEND", orch.get("grounding_backend", "lami")))
 
     trace = HarnessTrace(sample_id=sample_id, image_path=image_path or "", question=question)
-    trace.metadata["pipeline_cfg"] = {"grounding_backend": grounding_backend}
-    llm_plan: Dict[str, Any] = {}
-    llm_error: Optional[str] = None
+    skill_lib = build_skill_library()
+    tool_lib = build_tool_library()
+    library_ctx = build_library_context()
+    trace.metadata["library"] = {"skills": skill_lib.names(), "tools": tool_lib.names()}
+
+    state = ExecutionState(sample_id=sample_id, question=question, image=image, image_path=image_path)
+    state.planner_input = {
+        "question": question,
+        "benchmark_category": benchmark_category,
+        "library": library_ctx,
+        "output_requirement": "normalized points in [0,1]",
+    }
+    trace.add_execution_step(phase="plan", action="planner_input", details={"question": question, "library_names": trace.metadata["library"]})
+
     reasoner = _get_reasoner(cfg)
+    llm_plan_raw: Dict[str, Any] = {}
+    llm_error: Optional[str] = None
     if reasoner is not None:
         try:
-            llm_plan = reasoner.plan(question, image)
-            trace.metadata["llm_plan"] = llm_plan
+            llm_plan_raw = reasoner.plan(question, image, planner_context=state.planner_input)
+            trace.metadata["llm_plan"] = llm_plan_raw
             trace.metadata["llm_dialog"] = reasoner.get_last_trace()
         except Exception as e:
             llm_error = str(e)
             trace.metadata["llm_plan_error"] = llm_error
-            dialog = reasoner.get_last_trace()
-            if dialog:
-                dialog["error"] = llm_error
-                trace.metadata["llm_dialog"] = dialog
 
-    # Skill 1: task type
-    mapped = map_benchmark_category(benchmark_category)
-    if mapped:
-        task_type = mapped
-        task_info = {
-            "task_type": task_type,
-            "confidence": 0.99,
-            "reason": "benchmark category",
-        }
+    if not llm_plan_raw:
+        llm_plan_raw = _build_rule_plan(question, benchmark_category, image.size)
+        trace.metadata["plan_source"] = "rules_fallback"
     else:
-        llm_task = llm_plan.get("task_type")
-        if llm_task in (
-            R.OBJECT_AFFORDANCE_RECOGNITION,
-            R.OBJECT_AFFORDANCE_PREDICTION,
-            R.SPATIAL_AFFORDANCE_LOCALIZATION,
-        ):
-            task_type = llm_task
-            task_info = {
-                "task_type": llm_task,
-                "confidence": float(llm_plan.get("confidence", 0.7)),
-                "reason": llm_plan.get("reason", "llm planner"),
-            }
-            trace.reasoning_summary = str(llm_plan.get("reasoning_summary", ""))
-        else:
-            task_info = skill_task_type_classification(question)
-            task_type = task_info["task_type"]
-    trace.task_type = task_type
-    trace.add_skill("task_type_classification")
-    trace.metadata["task_info"] = task_info
+        trace.metadata["plan_source"] = "llm"
 
-    # Skill: search
-    search_info = skill_search_triggering(question, task_info)
-    if isinstance(llm_plan.get("need_search"), bool):
-        search_info["need_search"] = bool(llm_plan.get("need_search"))
-        qs = llm_plan.get("search_queries")
-        if isinstance(qs, list) and qs:
-            search_info["queries"] = [str(x) for x in qs if str(x).strip()][:3]
-    trace.add_skill("search_triggering")
-    search_result = None
-    if search_info.get("need_search"):
-        t0 = time.time()
-        search_result = tool_web_search(search_info.get("queries") or [])
-        trace.add_tool_call("web_search_tool", {"queries": search_info.get("queries")}, search_result, time.time() - t0)
-        trace.search_evidence = search_result
+    state.planner_plan_raw = llm_plan_raw
+    plan: Plan = plan_from_dict(llm_plan_raw)
+    validation = validate_plan(
+        plan,
+        valid_skills=skill_lib.names(),
+        valid_tools=tool_lib.names(),
+        tool_schemas=tool_required_args_hint(),
+    )
+    trace.metadata["plan_validation"] = {"ok": validation.ok, "errors": validation.errors, "warnings": validation.warnings}
+    trace.add_execution_step(phase="decide", action="validate_plan", details=trace.metadata["plan_validation"])
 
-    # Skill: LaMI prompt
-    prompt_info = skill_lami_prompt_engineering(question, task_info, search_result)
-    pov = llm_plan.get("prompt_overrides")
-    if isinstance(pov, dict):
-        for k in ("object_prompt", "part_prompt", "spatial_query", "negative_hint"):
-            if pov.get(k):
-                prompt_info[k] = str(pov[k])
-        if isinstance(pov.get("lami_classes"), dict):
-            prompt_info["lami_classes"] = pov["lami_classes"]
-    trace.engineered_prompt = prompt_info
-    trace.add_skill("lami_prompt_engineering")
+    if not validation.ok:
+        trace.failure_tags.append("invalid_plan")
+        if not plan.fallback_policy.get("use_rules_if_invalid_plan", True):
+            trace.failure_tags.append("fallback_disabled")
+        fallback_raw = _build_rule_plan(question, benchmark_category, image.size)
+        plan = plan_from_dict(fallback_raw)
+        trace.metadata["plan_source"] = "rules_after_validation_failure"
 
-    # Tool: LaMI
-    g = grounder
-    if g is None:
-        g = LaMIDetrGrounder()
-    t0 = time.time()
-    lami_result = tool_lami_detr_grounder(
-        image,
-        prompt_info,
+    state.plan = llm_plan_raw
+    trace.task_type = plan.task_type
+    for c in plan.selected_skills:
+        if c.name:
+            trace.add_skill(c.name)
+    for c in plan.selected_tools:
+        if c.name:
+            trace.add_tool_name(c.name)
+
+    final_points, final_meta = execute_plan(
+        plan,
+        state,
+        tool_lib=tool_lib,
+        trace=trace,
+        image=image,
+        grounder=grounder or LaMIDetrGrounder(),
         nms_iou=nms_iou,
-        score_threshold=score_th,
+        score_th=score_th,
         topk=topk,
-        backend=grounding_backend,
-        grounder=g,
+        grounding_backend=grounding_backend,
     )
-    trace.add_tool_call(
-        "lami_detr_grounder",
-        {"lami_classes": prompt_info.get("lami_classes"), "prompt_summary": lami_result.get("prompt_summary")},
-        lami_result,
-        time.time() - t0,
-    )
-
-    W, H = image.size
-    final_xy: List[Tuple[float, float]] = []
-
-    # Branch
-    if task_type == R.OBJECT_AFFORDANCE_RECOGNITION:
-        trace.add_skill("point_output_normalization")
-        raw_pts = aggregate_recognition((W, H), lami_result)
-        final_list = skill_point_output_normalization(raw_pts, W, H, task_type)
-        trace.final_points = final_list
-        trace.metadata["final_points_1000"] = points_norm_to_1000(final_list)
-        trace.reasoning_summary = "recognition: spread points from top LaMI box"
-        return trace.final_points, trace
-
-    if task_type == R.OBJECT_AFFORDANCE_PREDICTION:
-        trace.add_skill("zoom_before_detail")
-        zoom_info = skill_zoom_before_detail(task_type, question, lami_result.get("boxes") or [], image_size=(W, H))
-        if isinstance(llm_plan.get("need_zoom"), bool):
-            zoom_info["need_zoom"] = bool(llm_plan.get("need_zoom"))
-        crop_meta = None
-        crop_image = image
-        if zoom_info.get("need_zoom") and (lami_result.get("boxes") or []):
-            idx = int(zoom_info.get("crop_target_index", 0))
-            idx = min(idx, len(lami_result["boxes"]) - 1)
-            bbox = lami_result["boxes"][idx]["bbox"]
-            t0 = time.time()
-            crop_pack = tool_zoom_crop(
-                image,
-                bbox,
-                padding_ratio=float(zoom_info.get("padding_ratio", 0.15)),
-                max_side=int(zoom_info.get("resize_max_side", 1024)),
-            )
-            crop_meta = {k: v for k, v in crop_pack.items() if k != "crop"}
-            crop_image = crop_pack["crop"]
-            trace.add_tool_call("zoom_crop_tool", {"bbox": bbox, **zoom_info}, crop_pack, time.time() - t0)
-
-        trace.add_skill("code_when_geometry_matters")
-        code_skill = skill_code_when_geometry_matters(task_type, question, {})
-        if llm_plan.get("analysis_type"):
-            code_skill["analysis_type"] = str(llm_plan["analysis_type"])
-            code_skill["need_code_analysis"] = True
-        code_result: Dict[str, Any] = {}
-        if code_skill.get("need_code_analysis"):
-            cand = None
-            if crop_meta and len(lami_result.get("boxes") or []) >= 1:
-                cand = _boxes_to_crop_space(lami_result["boxes"][:2], crop_meta)
-            t0 = time.time()
-            code_result = tool_code_visual_analyzer(
-                crop_image,
-                code_skill.get("analysis_type", "interior_region"),
-                candidate_boxes_xyxy=cand,
-                crop_meta=crop_meta,
-                full_image_size=(W, H),
-                n_points=3,
-            )
-            trace.add_tool_call("code_visual_analyzer", code_skill, code_result, time.time() - t0)
-            trace.add_skill("code_when_geometry_matters")
-
-        raw_pts = aggregate_part((W, H), crop_meta, code_result, lami_result)
-        trace.add_skill("point_output_normalization")
-        final_list = skill_point_output_normalization(raw_pts, W, H, task_type)
-        trace.final_points = final_list
-        trace.metadata["final_points_1000"] = points_norm_to_1000(final_list)
-        trace.reasoning_summary = "part: LaMI object + zoom + template code"
-        return trace.final_points, trace
-
-    # spatial
-    trace.add_skill("zoom_before_detail")
-    zoom_info = skill_zoom_before_detail(task_type, question, lami_result.get("boxes") or [], image_size=(W, H))
-    if isinstance(llm_plan.get("need_zoom"), bool):
-        zoom_info["need_zoom"] = bool(llm_plan.get("need_zoom"))
-    crop_meta = None
-    crop_image = image
-    if zoom_info.get("need_zoom") and (lami_result.get("boxes") or []):
-        idx = int(zoom_info.get("crop_target_index", 0))
-        idx = min(idx, len(lami_result["boxes"]) - 1)
-        bbox = lami_result["boxes"][idx]["bbox"]
-        t0 = time.time()
-        crop_pack = tool_zoom_crop(image, bbox, padding_ratio=float(zoom_info.get("padding_ratio", 0.15)))
-        crop_meta = {k: v for k, v in crop_pack.items() if k != "crop"}
-        crop_image = crop_pack["crop"]
-        trace.add_tool_call("zoom_crop_tool", {"bbox": bbox, **zoom_info}, crop_pack, time.time() - t0)
-
-    boxes_list = lami_result.get("boxes") or []
-    if crop_meta:
-        cand = _boxes_to_crop_space(boxes_list, crop_meta)
-    else:
-        cand = [list(map(float, b["bbox"])) for b in boxes_list[:2]]
-    while len(cand) < 2:
-        cw, ch = crop_image.size
-        cand.append([cw * 0.25, ch * 0.25, cw * 0.35, ch * 0.75])
-
-    t0 = time.time()
-    code_result = tool_code_visual_analyzer(
-        crop_image,
-        "free_space_between_boxes",
-        candidate_boxes_xyxy=cand,
-        crop_meta=crop_meta,
-        full_image_size=(W, H),
-        n_points=5,
-    )
-    trace.add_tool_call("code_visual_analyzer", {"analysis_type": "free_space_between_boxes"}, code_result, time.time() - t0)
-    trace.add_skill("code_when_geometry_matters")
-
-    raw_pts = aggregate_spatial((W, H), code_result, lami_result)
-    trace.add_skill("point_output_normalization")
-    final_list = skill_point_output_normalization(raw_pts, W, H, task_type)
-    trace.final_points = final_list
-    trace.metadata["final_points_1000"] = points_norm_to_1000(final_list)
-    if not trace.reasoning_summary:
-        trace.reasoning_summary = "spatial: free-space template between LaMI boxes"
-    if llm_error and not trace.reasoning_summary:
-        trace.reasoning_summary = f"llm planner fallback: {llm_error}"
-    return trace.final_points, trace
+    trace.final_points = final_points
+    trace.metadata["execution_state"] = {
+        "planner_input": state.planner_input,
+        "plan": state.planner_plan_raw,
+        "tool_inputs": state.tool_inputs,
+        "tool_outputs": state.tool_outputs,
+        "errors": state.errors,
+        "fallback_info": state.fallback_info,
+    }
+    trace.metadata["final_points_1000"] = points_norm_to_1000(final_points)
+    trace.metadata["final_strategy"] = final_meta
+    if llm_error:
+        trace.metadata["llm_plan_error"] = llm_error
+    trace.reasoning_summary = plan.task_understanding or final_meta.get("strategy", "aggregate_point")
+    return final_points, trace
