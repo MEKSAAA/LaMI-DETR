@@ -1,9 +1,19 @@
+name: search_triggering
+type: skill
+description: Decide if external search is worth latency for long-tail/attribute-heavy questions.
+input_schema:
+  question: str
+  task_info: dict
+  llm_need_search: bool | null
+  llm_search_queries: list[str] | null
+output_schema:
+  need_search: bool
+  queries: list[str]
+  reasons: list[str]
+policy:
+  - Trigger search for long-tail attributes or long prompts.
+  - Allow planner override for need_search and query list.
+
 # Skill: search_triggering
 
-This skill decides whether external knowledge expansion is worth the latency cost. It does not call search APIs directly; it only emits a policy decision (`need_search`, `queries`, and `reasons`) for the orchestrator.
-
-Current heuristics trigger search for long-tail attributes, unusually long or abstract phrasing, and explicit rarity cues. The intent is to reserve search calls for samples where grounding is likely to benefit from auxiliary conceptual hints, while keeping straightforward cases fast.
-
-The skill is designed for graceful degradation. If search is requested but unavailable, tool-layer fallback still returns structured evidence with explicit backend and failure reason tags (`stub_no_key`, `stub_api_error`, `fallback_reason`). This keeps traces analyzable even in offline runs.
-
-In traces, this policy appears in `selected_skills`, and the resulting evidence is stored under `search_evidence`.
+Policy skill for optional knowledge expansion.
