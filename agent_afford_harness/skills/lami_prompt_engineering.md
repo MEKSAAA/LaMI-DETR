@@ -1,9 +1,22 @@
+name: lami_prompt_engineering
+type: skill
+description: Convert benchmark question to detector-friendly prompts and class descriptors.
+input_schema:
+  question: str
+  task_info: dict
+  search_result: dict | null
+  llm_prompt_overrides: dict | null
+output_schema:
+  object_prompt: str
+  part_prompt: str
+  spatial_query: str
+  negative_hint: str
+  lami_classes: dict[str, list[str]]
+policy:
+  - Keep prompt compact and detector-oriented.
+  - Inject search cues when available.
+  - Respect planner prompt overrides if valid.
+
 # Skill: lami_prompt_engineering
 
-This skill rewrites raw benchmark language into detector-facing prompt structures. Instead of passing the original question directly to grounding, it builds `prompt_info` with `object_prompt`, `part_prompt`, `spatial_query`, `negative_hint`, and `lami_classes` (class names mapped to short descriptor lists).
-
-The design objective is semantic fidelity with detector usability. For spatial questions, the skill tries to split anchor entities (for example, “between A and B”). For part questions, it emphasizes functional regions. If search evidence is available, it compresses extracted concepts into short visual hints that are still practical for grounding.
-
-The output is backend-agnostic and can be consumed by local LaMI-DETR or Doubao grounding. That makes prompt engineering a reusable policy layer rather than a backend-specific hardcode.
-
-If prompt construction fails, fallback is intentionally simple: `object_prompt = question`. This guarantees pipeline continuity while keeping failure visible in traces. Full prompt artifacts are always stored in `trace.engineered_prompt`.
+Policy skill for prompt shaping before grounding.
