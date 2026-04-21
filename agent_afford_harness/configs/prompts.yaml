@@ -1,0 +1,35 @@
+# Heuristic hints for rule-based skills (no LLM required in v1)
+task_type_keywords:
+  spatial:
+    - between
+    - free area
+    - empty space
+    - gap
+    - navigable
+    - placeable
+    - tabletop
+    - space in
+    - region between
+  part:
+    - what part
+    - which part
+    - part of
+    - handle
+    - blade
+    - cap
+    - gripped
+    - grasp
+    - interior
+    - liquid
+    - drinking
+    - holds
+
+search_trigger_extra:
+  # Extra triggers for long-tail / attribute-heavy queries
+  attributes:
+    - child-safe
+    - tamper
+    - medicine bottle
+    - prescription
+    - ergonomic
+    - specialized

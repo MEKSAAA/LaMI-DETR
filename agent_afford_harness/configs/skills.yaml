@@ -1,0 +1,39 @@
+# Skill registry (declarative policy layer).
+# Runtime implementation: agent/skills_runtime.py
+skills:
+  - name: task_type_classification
+    enabled: true
+    purpose: "Map question/category into recognition | part | spatial."
+    inputs: ["question", "optional_benchmark_category"]
+    outputs: ["task_type", "confidence", "reason"]
+    failure_policy: "fallback_to_object_affordance_prediction"
+  - name: lami_prompt_engineering
+    enabled: true
+    purpose: "Rewrite question into detector-friendly prompts and class descriptors."
+    inputs: ["question", "task_type", "optional_search_evidence"]
+    outputs: ["object_prompt", "part_prompt", "spatial_query", "lami_classes", "negative_hint"]
+    failure_policy: "use_raw_question_as_object_prompt"
+  - name: search_triggering
+    enabled: true
+    purpose: "Decide whether external search expansion is worth the latency."
+    inputs: ["question", "task_type"]
+    outputs: ["need_search", "queries", "reasons"]
+    failure_policy: "disable_search"
+  - name: zoom_before_detail
+    enabled: true
+    purpose: "Decide if local crop is required before detailed localization."
+    inputs: ["task_type", "question", "lami_boxes", "image_size"]
+    outputs: ["need_zoom", "crop_target_index", "padding_ratio", "resize_max_side"]
+    failure_policy: "no_zoom"
+  - name: code_when_geometry_matters
+    enabled: true
+    purpose: "Route to deterministic geometry analyzer template."
+    inputs: ["task_type", "question", "tool_outputs_hint"]
+    outputs: ["need_code_analysis", "analysis_type"]
+    failure_policy: "skip_code_analysis"
+  - name: point_output_normalization
+    enabled: true
+    purpose: "Convert arbitrary point coords into benchmark-ready normalized [0,1] points."
+    inputs: ["points_xy", "image_width", "image_height", "task_type"]
+    outputs: ["normalized_points"]
+    failure_policy: "emit_center_points"

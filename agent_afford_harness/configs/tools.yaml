@@ -1,0 +1,37 @@
+tools:
+  - name: lami_detr_grounder
+    enabled: true
+    kind: "grounding"
+    purpose: "Generate candidate object boxes from text prompts."
+    inputs: ["image", "prompt_info", "nms_iou", "score_threshold", "topk", "backend"]
+    outputs: ["boxes(pixel)", "boxes_1000", "scores", "class_name", "image_size", "backend"]
+    coordinate_contract: "internal pixel xyxy; optional bbox_1000 for Doubao compatibility"
+    determinism: "deterministic if backend deterministic"
+    timeout_s: 45
+  - name: zoom_crop_tool
+    enabled: true
+    kind: "preprocess"
+    purpose: "Crop and enlarge ROI while preserving reversible coordinate mapping."
+    inputs: ["image", "bbox_xyxy", "padding_ratio", "max_side"]
+    outputs: ["crop", "origin_xy", "crop_width", "crop_height", "scale"]
+    coordinate_contract: "returns crop->full inverse map metadata"
+    determinism: "deterministic"
+    timeout_s: 5
+  - name: code_visual_analyzer
+    enabled: true
+    kind: "geometry"
+    purpose: "Template-based deterministic local reasoning (interior/grasp/free-space)."
+    inputs: ["crop_image", "analysis_type", "candidate_boxes", "crop_meta", "full_image_size"]
+    outputs: ["points_normalized_crop", "points_full_image", "confidence", "text", "mask_debug"]
+    coordinate_contract: "crop normalized points plus optional projected full-image points"
+    determinism: "deterministic templates"
+    timeout_s: 15
+  - name: web_search_tool
+    enabled: true
+    kind: "knowledge"
+    purpose: "Expand long-tail concepts into detector-friendly attributes/cues."
+    inputs: ["queries"]
+    outputs: ["concepts", "visual_cues", "raw_search_results(optional)", "backend", "fallback_reason(optional)"]
+    coordinate_contract: "N/A"
+    determinism: "non-deterministic when using live API"
+    timeout_s: 30

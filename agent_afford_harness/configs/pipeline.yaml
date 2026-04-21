@@ -1,0 +1,31 @@
+# Orchestrator & baselines
+orchestrator:
+  nms_iou: 0.7
+  score_threshold: 0.25
+  lami_topk: 8
+  # lami | doubao_grounding
+  grounding_backend: lami
+
+llm:
+  # rules | local_qwen_vl | api_vlm
+  mode: rules
+  # Local open-source VLM path
+  local_model_path: /NEW_EDS/miaojw/models/Qwen2.5-VL-3B-Instruct
+  # API model (Doubao/ARK OpenAI-compatible endpoint)
+  api_model: doubao-seed-2-0-lite-250821
+  api_base_url: https://ark.cn-beijing.volces.com/api/v3
+  api_key: null
+  max_new_tokens: 512
+  temperature: 0.1
+
+paths:
+  # Override with env AGENT_HARNESS_LAMI_CONFIG
+  lami_config: null
+
+logging:
+  save_debug_images: true
+  debug_subdir: debug_images
+
+evaluation:
+  # Points are evaluated in [0,1] vs RoboAfford masks
+  assume_normalized_output: true

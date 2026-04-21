@@ -103,6 +103,8 @@ celerybeat.pid
 
 # Environments
 .env
+agent_afford_harness/.env
+agent_afford_harness/outputs/
 .venv
 env/
 venv/
