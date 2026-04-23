@@ -29,6 +29,7 @@ class HarnessTrace:
     reasoning_summary: str = ""
     started_at: float = field(default_factory=time.time)
     metadata: Dict[str, Any] = field(default_factory=dict)
+    execution_steps: List[Dict[str, Any]] = field(default_factory=list)
 
     def add_skill(self, name: str) -> None:
         if name not in self.selected_skills:
@@ -54,6 +55,31 @@ class HarnessTrace:
         if duration_s is not None:
             entry["duration_s"] = duration_s
         self.tool_calls.append(entry)
+        self.add_execution_step(
+            phase="observe",
+            action=name,
+            details={
+                "tool_input": self._json_safe(input_payload),
+                "tool_output": self._json_safe(output_payload),
+                "duration_s": duration_s,
+            },
+        )
+
+    def add_execution_step(
+        self,
+        *,
+        phase: str,
+        action: str,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        self.execution_steps.append(
+            {
+                "phase": phase,
+                "action": action,
+                "details": self._json_safe(details or {}),
+                "index": len(self.execution_steps),
+            }
+        )
 
     @staticmethod
     def _json_safe(x: Any) -> Any:
@@ -86,5 +112,6 @@ class HarnessTrace:
             "failure_tags": list(self.failure_tags),
             "reasoning_summary": self.reasoning_summary,
             "metadata": copy.deepcopy(self.metadata),
+            "execution_steps": copy.deepcopy(self.execution_steps),
         }
         return d

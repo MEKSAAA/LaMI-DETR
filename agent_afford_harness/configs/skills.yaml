@@ -2,38 +2,44 @@
 # Runtime implementation: agent/skills_runtime.py
 skills:
   - name: task_type_classification
+    type: skill
     enabled: true
-    purpose: "Map question/category into recognition | part | spatial."
-    inputs: ["question", "optional_benchmark_category"]
-    outputs: ["task_type", "confidence", "reason"]
+    description: "Map question/category into recognition | part | spatial."
+    input_schema: {question: str, benchmark_category: "str|null"}
+    output_schema: {task_type: str, confidence: float, reason: str}
     failure_policy: "fallback_to_object_affordance_prediction"
   - name: lami_prompt_engineering
+    type: skill
     enabled: true
-    purpose: "Rewrite question into detector-friendly prompts and class descriptors."
-    inputs: ["question", "task_type", "optional_search_evidence"]
-    outputs: ["object_prompt", "part_prompt", "spatial_query", "lami_classes", "negative_hint"]
+    description: "Rewrite question into detector-friendly prompts and class descriptors."
+    input_schema: {question: str, task_type: str, search_evidence: "dict|null"}
+    output_schema: {object_prompt: str, part_prompt: str, spatial_query: str, lami_classes: dict, negative_hint: str}
     failure_policy: "use_raw_question_as_object_prompt"
   - name: search_triggering
+    type: skill
     enabled: true
-    purpose: "Decide whether external search expansion is worth the latency."
-    inputs: ["question", "task_type"]
-    outputs: ["need_search", "queries", "reasons"]
+    description: "Decide whether external search expansion is worth the latency."
+    input_schema: {question: str, task_type: str}
+    output_schema: {need_search: bool, queries: list, reasons: list}
     failure_policy: "disable_search"
   - name: zoom_before_detail
+    type: skill
     enabled: true
-    purpose: "Decide if local crop is required before detailed localization."
-    inputs: ["task_type", "question", "lami_boxes", "image_size"]
-    outputs: ["need_zoom", "crop_target_index", "padding_ratio", "resize_max_side"]
+    description: "Decide if local crop is required before detailed localization."
+    input_schema: {task_type: str, question: str, lami_boxes: list, image_size: list}
+    output_schema: {need_zoom: bool, crop_target_index: int, padding_ratio: float, resize_max_side: int}
     failure_policy: "no_zoom"
   - name: code_when_geometry_matters
+    type: skill
     enabled: true
-    purpose: "Route to deterministic geometry analyzer template."
-    inputs: ["task_type", "question", "tool_outputs_hint"]
-    outputs: ["need_code_analysis", "analysis_type"]
+    description: "Route to deterministic geometry analyzer template."
+    input_schema: {task_type: str, question: str, tool_outputs_hint: dict}
+    output_schema: {need_code_analysis: bool, analysis_type: str}
     failure_policy: "skip_code_analysis"
   - name: point_output_normalization
+    type: skill
     enabled: true
-    purpose: "Convert arbitrary point coords into benchmark-ready normalized [0,1] points."
-    inputs: ["points_xy", "image_width", "image_height", "task_type"]
-    outputs: ["normalized_points"]
+    description: "Convert arbitrary point coords into benchmark-ready normalized [0,1] points."
+    input_schema: {points_xy: list, image_width: int, image_height: int, task_type: str}
+    output_schema: {normalized_points: list}
     failure_policy: "emit_center_points"

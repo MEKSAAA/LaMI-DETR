@@ -1,6 +1,6 @@
 # Agentic Affordance Harness (RoboAfford-Eval)
 
-参数冻结的 **Orchestrator + Skills + Tools** 流水线：输入图像与问题，产出 RoboAfford 可用的 **归一化坐标点**，并写出结构化 **trace**（便于后续 self-evolve）。
+参数冻结的 **Orchestrator-driven Harness Agent**：输入图像与问题后，Orchestrator 在统一 **library（skills + tools）** 中按需选择并调用 API，按 `plan -> act -> observe -> decide` 闭环执行，产出 RoboAfford 可用的 **归一化坐标点**，并写出结构化 **trace**（便于后续分析与扩展）。
 
 ## 依赖
 

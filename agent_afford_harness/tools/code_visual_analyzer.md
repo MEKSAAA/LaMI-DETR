@@ -1,14 +1,21 @@
+name: code_visual_analyzer
+type: tool
+description: Run deterministic geometry templates to produce candidate affordance points.
+input_schema:
+  image: PIL.Image
+  analysis_type: enum[interior_region, elongated_grasp_region, free_space_between_boxes]
+  candidate_boxes_xyxy: list[list[float]] | null
+  crop_meta: dict | null
+  full_image_size: [int, int] | null
+  n_points: int
+output_schema:
+  analysis_type: str
+  points_normalized_crop: list[list[float]]
+  points_full_image: list[list[float]]
+  confidence: float
+  text: str
+system_prompt: "Use deterministic templates only; no free-form code generation."
+
 # Tool: code_visual_analyzer
 
-`code_visual_analyzer` is a deterministic geometry reasoning module. It does not run free-form agent-generated code; instead, it executes a fixed set of reproducible templates and returns structured candidate points for aggregation.
-
-Implementation entrypoint: `tools/code_visual_analyzer.py::tool_code_visual_analyzer`.
-
-Inputs include an image (full frame or crop), `analysis_type`, and optional context (`candidate_boxes_xyxy`, `crop_meta`, `full_image_size`). Outputs include crop-normalized points, projected full-image points, confidence, and textual diagnostics.
-
-Supported templates are:
-- `interior_region`
-- `elongated_grasp_region`
-- `free_space_between_boxes`
-
-The design constraint is stability over flexibility: deterministic templates make regression tracking and failure triage easier in benchmark-driven harness development.
+Template-based deterministic visual analyzer.
