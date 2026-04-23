@@ -42,6 +42,8 @@ python -m agent_afford_harness.harness.run_single_case \
 - `run_single_local_qwen.sh`：本地 Qwen2.5-VL 主推理
 - `run_single_api_doubao.sh`：API 主推理（Doubao）
 - `run_single_doubao_grounding.sh`：强制 Doubao Grounding（1000x1000 坐标）
+- `run_fixed_doubao_lami.sh`：单会话长对话（Doubao 多轮 + LaMI 工具调用）
+- `run_fixed_doubao_lami_batch.sh`：从 `annotations_absxy.json` 批量推理
 - `run_showcase_subset.sh`：跑 9-case 子集
 - `visualize_trace.sh`：渲染 trace 到图片
 
@@ -66,10 +68,17 @@ ARK_API_KEY=xxxx agent_afford_harness/scripts/run_single_api_doubao.sh
 # 4) Doubao grounding
 ARK_API_KEY=xxxx agent_afford_harness/scripts/run_single_doubao_grounding.sh
 
-# 5) 跑子集
+# 5) 固定长对话（Doubao -> tool call(s) -> Doubao points）
+ARK_API_KEY=xxxx agent_afford_harness/scripts/run_fixed_doubao_lami.sh
+
+# 6) 固定长对话批量（annotations_absxy.json）
+ARK_API_KEY=xxxx agent_afford_harness/scripts/run_fixed_doubao_lami_batch.sh \
+  /data9/data/miaojw/projects26/RoboAfford/annotations_absxy.json 0 50
+
+# 7) 跑子集
 agent_afford_harness/scripts/run_showcase_subset.sh
 
-# 6) 可视化
+# 8) 可视化
 agent_afford_harness/scripts/visualize_trace.sh \
   agent_afford_harness/outputs/traces/demo_richhf.json \
   agent_afford_harness/outputs/debug_images/demo.png
@@ -122,6 +131,98 @@ export AGENT_HARNESS_GROUNDING_BACKEND=doubao_grounding
 - 最终点仍输出 RoboAfford 所需 `[0,1]`，同时在 trace 增加 `metadata.final_points_1000`。
 
 > 若 `local_qwen_vl/api_vlm` 调用失败，会自动回退到规则路由，并在 trace 的 `metadata.llm_plan_error` 中记录错误。
+
+### 固定长对话工具调用（Doubao + LaMI）
+
+新增固定流程：`agent_afford_harness/harness/run_fixed_doubao_lami.py`  
+脚本：`agent_afford_harness/scripts/run_fixed_doubao_lami.sh`
+
+流程为单次会话内多轮：
+- Doubao 在同一段对话中输出 action（`call_lami` / `final_points`）
+- agent 执行 `lami_grounder` 工具并把 observation 回灌到同一会话
+- 直到模型输出 `final_points`
+
+trace 会完整记录：
+- `stages.long_dialogue`：system、初始 user、每轮 assistant 原文与解析 JSON
+- `stages.tool_calls`：每次 LaMI 工具调用的 input/output
+- `final_points`：最终归一化点
+- `stages.boxed_image.annotated_image_path`：LaMI 后标框图（命名：`<sample_id>_lami_boxes.jpg`）
+- `stages.final_points_image.final_points_image_path`：最终点可视化图（命名：`<sample_id>_final_points.jpg`）
+
+#### 参数说明：`run_fixed_doubao_lami.sh`
+
+位置参数：
+- `$1` `IMAGE_PATH`：图片路径（默认 `RoboAfford/images/00.jpg`）
+- `$2` `QUESTION`：问题文本（默认 mug 示例）
+- `$3` `SAMPLE_ID`：trace 样本名（默认 `fixed_doubao_lami`）
+
+对应 Python 入口：`agent_afford_harness.harness.run_fixed_doubao_lami`
+
+可选参数：
+- `--image`：图片路径
+- `--question`：问题文本
+- `--sample-id`：样本名
+- `--trace-out`：手动指定 trace 输出路径
+- `--topk`：LaMI top-k 框（默认 8）
+
+---
+
+### 批量推理：从 annotations 解析任务
+
+脚本：`agent_afford_harness/scripts/run_fixed_doubao_lami_batch.sh`
+
+位置参数：
+- `$1` `ANNOTATIONS_FILE`：标注文件路径（默认 `RoboAfford/annotations_absxy.json`）
+- `$2` `START`：起始索引（默认 `0`）
+- `$3` `LIMIT`：处理条数（默认 `50`）
+
+对应 Python 入口：`agent_afford_harness.harness.run_fixed_doubao_lami_batch`
+
+可选参数：
+- `--annotations-file`：标注 JSON 路径
+- `--data-root`：数据根目录（用于拼接 `img/mask`）
+- `--trace-dir`：每条 trace 输出目录
+- `--output-summary`：批量汇总 JSON 输出路径
+- `--start`：起始索引
+- `--limit`：处理条数（`<=0` 表示从 start 跑到末尾）
+- `--topk`：LaMI top-k
+- `--sample-prefix`：trace 文件名前缀
+- `--no-skip-existing`：默认跳过已存在 trace；加此参数则不跳过
+- `--no-eval`：默认计算每条 reward；加此参数则不计算
+
+示例：
+
+```bash
+python -m agent_afford_harness.harness.run_fixed_doubao_lami_batch \
+  --annotations-file /data9/data/miaojw/projects26/RoboAfford/annotations_absxy.json \
+  --data-root /data9/data/miaojw/projects26/RoboAfford \
+  --trace-dir agent_afford_harness/outputs/traces/batch_fixed_doubao_lami \
+  --output-summary agent_afford_harness/outputs/predictions/batch_fixed_doubao_lami_summary.json \
+  --start 0 \
+  --limit 100
+```
+
+---
+
+### Trace 评测脚本
+
+入口：`python -m agent_afford_harness.harness.eval_traces`
+
+参数：
+- `--traces-dir`：待评测 traces 目录
+- `--gt-file`：GT 标注 JSON（如 `annotations_absxy.json`）
+- `--data-root`：GT 中 `img/mask` 的根目录
+- `--output-file`：评测汇总输出 JSON
+
+示例：
+
+```bash
+python -m agent_afford_harness.harness.eval_traces \
+  --traces-dir agent_afford_harness/outputs/traces/batch_fixed_doubao_lami \
+  --gt-file /data9/data/miaojw/projects26/RoboAfford/annotations_absxy.json \
+  --data-root /data9/data/miaojw/projects26/RoboAfford \
+  --output-file agent_afford_harness/outputs/predictions/trace_eval_summary.json
+```
 
 子集评测（9 例 showcase；需 `projects26/RoboAfford/images` 与 `masks` 存在）：
 
